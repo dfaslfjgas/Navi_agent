@@ -1,5 +1,5 @@
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
 from ..model.model import Model
 from ..tool.registry import ToolRegistry
@@ -25,7 +25,7 @@ class AgentLoop:
         self._registry = registry
         self._max_iterations = max_iterations
 
-    async def run(
+    async def loop(
         self,
         messages: list[BaseMessage],
         callback: LoopCallback,
@@ -35,12 +35,26 @@ class AgentLoop:
         # 使用独立历史，避免修改调用方的消息。
         history = list(messages)
         schemas = self._registry.list_schemas()
+        finalize_at = max(0, self._max_iterations - 3)
 
-        for _ in range(self._max_iterations):
+        for loop_cnt in range(self._max_iterations):
             response: AIMessage | None = None
 
+            allow_tools = loop_cnt < finalize_at
+            if loop_cnt == finalize_at:
+                history.append(SystemMessage(
+                    content=(
+                        "警告：当前任务已达到工具调用轮次限制，"
+                        "后续不允许继续调用任何工具。"
+                        "请基于现有对话历史和工具执行结果完成收尾，"
+                        "直接给出最终回复。"
+                        "如果任务尚未完成，请如实说明已完成的部分和剩余工作，"
+                        "不要编造未执行的操作或结果。"
+                    )
+                ))
+
             # 单次 LLM 调用。
-            async for output in self._model.stream(history, schemas):
+            async for output in self._model.stream(history, schemas if allow_tools else None):
                 if isinstance(output, str):
                     await callback(CallbackEvent.TEXT_CHUNK, output)
 
@@ -65,21 +79,30 @@ class AgentLoop:
 
             # 查找并执行工具，回填工具结果。
             for call in response.tool_calls:
-                tool = self._registry.get(call["name"])
-
-                if tool is None:
+                # 不允许调用工具的时候 loop 强制返回错误
+                if not allow_tools:
                     result = ToolResult(
                         tool_call_id=call["id"],
                         success=False,
                         content="",
-                        error=f"Tool not found: {call['name']}",
+                        error="Tool execution is disabled: iteration limit reached",
                     )
                 else:
-                    result = await execute_tool(
-                        tool=tool,
-                        arguments=call["args"],
-                        tool_call_id=call["id"],
-                    )
+                    tool = self._registry.get(call["name"])
+
+                    if tool is None:
+                        result = ToolResult(
+                            tool_call_id=call["id"],
+                            success=False,
+                            content="",
+                            error=f"Tool not found: {call['name']}",
+                        )
+                    else:
+                        result = await execute_tool(
+                            tool=tool,
+                            arguments=call["args"],
+                            tool_call_id=call["id"],
+                        )
 
                 # 记录并通知工具执行结果。
                 tool_message = to_langchain_message(result)
@@ -87,5 +110,6 @@ class AgentLoop:
                 await callback(CallbackEvent.TOOL_COMPLETED, tool_message)
 
         raise RuntimeError(
-            f"Agent exceeded max_iterations={self._max_iterations}"
+            "Agent failed to finalize: model requested tools "
+            "after tool execution was disabled"
         )
