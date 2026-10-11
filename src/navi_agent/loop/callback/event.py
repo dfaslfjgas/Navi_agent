@@ -7,3 +7,4 @@ class CallbackEvent(StrEnum):
     TEXT_CHUNK = "text_chunk"
     LLM_RESPONSE = "llm_response"
     TOOL_COMPLETED = "tool_completed"
+    PRELLM = "prellm"

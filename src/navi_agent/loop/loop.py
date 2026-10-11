@@ -33,7 +33,7 @@ class AgentLoop:
         """执行 Agent Loop，通过 Callback 通知外部。"""
 
         # 使用独立历史，避免修改调用方的消息。
-        history = list(messages)
+        chat_context = list(messages)
         schemas = self._registry.list_schemas()
         finalize_at = max(0, self._max_iterations - 3)
 
@@ -42,7 +42,7 @@ class AgentLoop:
 
             allow_tools = loop_cnt < finalize_at
             if loop_cnt == finalize_at:
-                history.append(SystemMessage(
+                chat_context.append(SystemMessage(
                     content=(
                         "警告：当前任务已达到工具调用轮次限制，"
                         "后续不允许继续调用任何工具。"
@@ -53,8 +53,10 @@ class AgentLoop:
                     )
                 ))
 
+
+            await callback(CallbackEvent.PRELLM, chat_context)
             # 单次 LLM 调用。
-            async for output in self._model.stream(history, schemas if allow_tools else None):
+            async for output in self._model.stream(chat_context, schemas if allow_tools else None):
                 if isinstance(output, str):
                     await callback(CallbackEvent.TEXT_CHUNK, output)
 
@@ -65,7 +67,7 @@ class AgentLoop:
                 raise RuntimeError("Model returned no response")
 
             # 记录完整的 LLM 响应。
-            history.append(response)
+            chat_context.append(response)
             await callback(CallbackEvent.LLM_RESPONSE, response)
 
             if response.invalid_tool_calls:
@@ -106,9 +108,10 @@ class AgentLoop:
 
                 # 记录并通知工具执行结果。
                 tool_message = to_langchain_message(result)
-                history.append(tool_message)
+                chat_context.append(tool_message)
                 await callback(CallbackEvent.TOOL_COMPLETED, tool_message)
 
+        # TODO: 后续修改为LoopFinalizationError
         raise RuntimeError(
             "Agent failed to finalize: model requested tools "
             "after tool execution was disabled"
