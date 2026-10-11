@@ -1,10 +1,9 @@
 
 import asyncio
-from typing import Any, Coroutine
+from typing import Any
 
 from jsonschema import ValidationError, validate
 
-from src.navi_agent.tool.schema import ToolResult
 from .tool import Tool
 from .schema import ToolResult
 
@@ -57,11 +56,3 @@ async def execute_tool(
                 )
 
     raise RuntimeError("Unexpected tool execution state")
-
-async def tool_execute_max_try(tool_call_id: str,):
-    return ToolResult(
-        tool_call_id=tool_call_id,
-        success=False,
-        content="",
-        error=f"tool calls max try",
-    )
