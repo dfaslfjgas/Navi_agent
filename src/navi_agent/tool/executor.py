@@ -1,9 +1,10 @@
 
 import asyncio
-from typing import Any
+from typing import Any, Coroutine
 
 from jsonschema import ValidationError, validate
 
+from src.navi_agent.tool.schema import ToolResult
 from .tool import Tool
 from .schema import ToolResult
 
@@ -27,8 +28,9 @@ async def execute_tool(
 
     metadata = tool.metadata
 
-    # max_retries 表示首次执行失败后的额外尝试次数。
-    for attempt in range(metadata.max_retries + 1):
+    # max_retries 表示首次执行失败后的额外尝试次数，负数按 0 处理。
+    retries = max(metadata.max_retries, 0)
+    for attempt in range(retries + 1):
         try:
             result = await asyncio.wait_for(
                 tool.execute(arguments),
@@ -46,7 +48,7 @@ async def execute_tool(
             raise
 
         except Exception as exc:
-            if attempt == metadata.max_retries:
+            if attempt == retries:
                 return ToolResult(
                     tool_call_id=tool_call_id,
                     success=False,
@@ -55,3 +57,11 @@ async def execute_tool(
                 )
 
     raise RuntimeError("Unexpected tool execution state")
+
+async def tool_execute_max_try(tool_call_id: str,):
+    return ToolResult(
+        tool_call_id=tool_call_id,
+        success=False,
+        content="",
+        error=f"tool calls max try",
+    )

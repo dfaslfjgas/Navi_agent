@@ -2,7 +2,7 @@
 from collections.abc import AsyncIterator, Sequence
 from typing import TypeAlias
 
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, message_chunk_to_message
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
@@ -53,10 +53,6 @@ class Model:
         if response is None:
             return
 
-        yield AIMessage(
-            content=response.content,
-            tool_calls=response.tool_calls,
-            invalid_tool_calls=response.invalid_tool_calls,
-            response_metadata=response.response_metadata,
-            usage_metadata=response.usage_metadata,
-        )
+        message = message_chunk_to_message(response)
+        assert isinstance(message, AIMessage)
+        yield message
